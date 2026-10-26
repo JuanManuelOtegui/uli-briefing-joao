@@ -1,0 +1,56 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Propuesta comercial · Uruguay Land Invest</title>
+<style>
+@font-face{font-family:Jost;src:url(jost.woff2) format('woff2');font-weight:100 900}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:radial-gradient(ellipse at 50% 30%,#12281b,#050d08 70%);color:#f7f4ec;font-family:Jost,system-ui,sans-serif;display:flex;align-items:center;justify-content:center}
+.box{width:min(92vw,400px);text-align:center}
+img{height:46px;margin-bottom:28px}
+h1{font-size:13px;letter-spacing:.3em;text-transform:uppercase;color:#E8B86D;margin:0 0 8px;font-weight:600}
+p{margin:0 0 26px;color:#b9b4a4;font-size:15px;line-height:1.5}
+input{width:100%;padding:14px 16px;margin-bottom:12px;border-radius:10px;border:1px solid rgba(232,184,109,.3);background:rgba(6,16,10,.8);color:#f7f4ec;font:inherit;font-size:16px;outline:none}
+input:focus{border-color:#E8B86D}
+button{width:100%;padding:14px;border-radius:10px;border:0;background:#E8B86D;color:#081109;font:inherit;font-weight:700;font-size:15px;letter-spacing:.08em;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+#err{min-height:22px;margin-top:14px;font-size:14px;color:#e59b72}
+small{display:block;margin-top:22px;color:#7d7a6d;font-size:12px;line-height:1.5}
+</style></head><body><form class="box" id="f" autocomplete="on">
+<img src="logo.png" alt="Uruguay Land Invest"><h1>Propuesta comercial</h1><p>Confidencial. Ingresa con las credenciales que te enviamos.</p>
+<input id="u" name="username" placeholder="Usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+<input id="p" name="password" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+<button id="b">Ingresar</button><div id="err"></div>
+<small>El acceso es personal y por tiempo limitado. Por favor, no lo reenvíes.</small></form>
+<script>
+const $=id=>document.getElementById(id), CACHE='uli-v1', b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+let skew=0;
+async function serverNow(){ try{ const r=await fetch('keys.json',{method:'HEAD',cache:'no-store'}); const d=r.headers.get('date'); if(d){ skew=new Date(d).getTime()-Date.now(); } }catch(e){} return Date.now()+skew; }
+async function go(){ const reg=await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
+  if(!navigator.serviceWorker.controller){ await new Promise(r=>{ const t=setTimeout(r,1500); navigator.serviceWorker.addEventListener('controllerchange',()=>{clearTimeout(t);r()},{once:true}); }); }
+  location.replace('app/index.html'); }
+(async()=>{
+  if(location.hash==='#logout'){ await caches.delete(CACHE); const rs=await navigator.serviceWorker.getRegistrations(); rs.forEach(r=>r.unregister()); history.replaceState(null,'','./'); return; }
+  try{ const c=await caches.open(CACHE), m=await c.match('__meta'); if(m){ const {exp}=await m.json(); if(await serverNow()<exp) return go(); await caches.delete(CACHE); $('err').textContent='Tu acceso ha vencido.'; } }catch(e){}
+})();
+$('f').addEventListener('submit',async e=>{ e.preventDefault(); const btn=$('b'), err=$('err'); err.textContent=''; btn.disabled=true; btn.textContent='Ingresando…';
+  try{
+    if(!window.isSecureContext||!crypto.subtle) throw new Error('Esta página requiere una conexión segura (https).');
+    const keys=await (await fetch('keys.json',{cache:'no-store'})).json(), u=$('u').value.trim().toLowerCase(), pw=$('p').value, rec=keys.find(k=>k.u===u);
+    const bad=()=>{ throw new Error('Usuario o contraseña incorrectos.'); };
+    if(!rec) bad();
+    const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+    const kek=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b64(rec.s),iterations:rec.it,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+    let raw; try{ raw=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(rec.i)},kek,b64(rec.w)); }catch(_){ bad(); }
+    const ck=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']);
+    btn.textContent='Abriendo…';
+    const blob=new Uint8Array(await (await fetch('deck.bin',{cache:'no-store'})).arrayBuffer());
+    const plain=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:blob.slice(0,12)},ck,blob.slice(12)));
+    const ml=new DataView(plain.buffer).getUint32(0), man=JSON.parse(new TextDecoder().decode(plain.slice(4,4+ml))), data=plain.slice(4+ml);
+    const now=await serverNow(), exp=new Date(man.exp).getTime();
+    if(now>=exp) throw new Error('Tu acceso ha vencido.');
+    await caches.delete(CACHE); const c=await caches.open(CACHE);
+    for(const f of man.files){ await c.put('app/'+f.p,new Response(data.slice(f.o,f.o+f.l),{headers:{'Content-Type':f.t}})); }
+    await c.put('__meta',new Response(JSON.stringify({exp,skew,user:rec.u})));
+    await go();
+  }catch(ex){ err.textContent=ex.message||'Algo salió mal.'; btn.disabled=false; btn.textContent='Ingresar'; }
+});
+</script></body></html>
